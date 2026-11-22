@@ -1,0 +1,127 @@
+# forex-bot configuration
+#
+# Secrets (OANDA token, Telegram token) go in .env, never in this file.
+# Check this file with:  forex-bot check
+#
+# Instruments use OANDA names: XAU_USD (gold), XAG_USD (silver), EUR_USD, GBP_USD,
+# USD_JPY, AUD_USD, USD_CHF, USD_CAD, NZD_USD, EUR_GBP, EUR_JPY, GBP_JPY, ...
+# Timeframes: M1 M5 M15 M30 H1 H4 D
+
+account_currency: USD
+
+data:
+  # auto: OANDA when OANDA_API_TOKEN is set in .env, otherwise Yahoo Finance (free).
+  # Other choices: oanda, yahoo, csv (files made by "forex-bot fetch"), synthetic.
+  source: auto
+  csv_dir: data
+  # Yahoo symbols used when source is yahoo. Gold defaults to COMEX gold futures.
+  yahoo_symbols:
+    XAU_USD: GC=F
+
+oanda:
+  # practice = demo money, live = real money. OANDA_ENVIRONMENT in .env overrides this.
+  environment: practice
+
+paper:
+  # Used by backtests and paper trading.
+  initial_balance: 10000
+  commission_per_trade: 0
+  slippage_pips: 0
+  # Modelled spreads when only mid prices are known (Yahoo, CSV). In pips:
+  # gold pip = 0.01 USD, so 35 pips = 0.35 USD per ounce.
+  spread_pips:
+    XAU_USD: 35
+    EUR_USD: 1.0
+    GBP_USD: 1.4
+  # Needed only for cross pairs whose quote currency is not the account currency,
+  # for example EUR_GBP on a USD account needs GBP_USD.
+  conversion_rates: {}
+
+risk:
+  max_open_trades: 25          # all bots together
+  daily_loss_limit_pct: 4      # stop opening trades for the rest of the UTC day
+  max_drawdown_pct: 20         # kill switch from the equity peak (forex-bot reset-risk)
+  close_all_on_max_drawdown: true
+  margin_buffer_pct: 20        # always keep this much equity free as margin
+  max_spread_pips:             # skip entries while the spread is wider than this
+    XAU_USD: 80
+    default: 4
+
+engine:
+  poll_seconds: 30
+  state_file: state/forex_bot_state.json   # becomes .paper.json / .live.json
+  log_file: logs/forex_bot.log
+  log_level: INFO
+
+# Sizing modes:
+#   risk      value = percent of equity lost if the stop loss is hit (max 5)
+#   notional  value = trade size in account currency (5000 = 5,000 USD of EUR_USD)
+#   units     value = units (for XAU_USD one unit is one troy ounce)
+#
+# On an OANDA account WITHOUT hedging (US accounts and most defaults), two bots on the
+# same instrument can close each other's trades. Give each bot its own instrument there,
+# or disable gold-dca. Backtests and paper trading are not affected.
+
+bots:
+  - id: gold-trend
+    instrument: XAU_USD
+    granularity: H1
+    strategy: ema_rsi
+    sizing: {mode: risk, value: 1.0}
+    params:
+      fast: 20
+      slow: 50
+      trend: 200           # only trade in the direction of the 200 EMA (0 = off)
+      rsi_period: 14
+      rsi_long_max: 70
+      rsi_short_min: 30
+      atr_period: 14
+      sl_atr: 2.0          # stop loss 2 x ATR from entry
+      tp_atr: 3.0          # take profit 3 x ATR from entry
+      allow_long: true
+      allow_short: true
+      exit_on_cross: true
+
+  - id: gbpusd-trend
+    instrument: GBP_USD
+    granularity: H1
+    strategy: ema_rsi
+    sizing: {mode: risk, value: 0.5}
+    params:
+      fast: 20
+      slow: 50
+      trend: 200
+      sl_atr: 2.0
+      tp_atr: 3.0
+
+  - id: eurusd-grid
+    instrument: EUR_USD
+    granularity: M15
+    strategy: grid
+    sizing: {mode: notional, value: 5000}
+    params:
+      mode: long           # long, short or neutral (neutral needs a hedging account)
+      range_pct: 0.6       # grid spans 0.6% either side of the price when it starts
+      levels: 6
+      stop_pct: 0.4        # stop loss 0.4% beyond the grid edge
+      recenter: true       # rebuild the grid around the price after a breakout
+      # Fixed range instead of auto: set both
+      # lower: 1.0700
+      # upper: 1.0900
+
+  - id: gold-dca
+    instrument: XAU_USD
+    granularity: H4
+    strategy: dca
+    # 1 ounce per order. OANDA's smallest gold trade is 1 ounce, so on a small account
+    # keep max_buys low: 4 ounces of gold is several times a 10,000 USD balance.
+    sizing: {mode: units, value: 1}
+    params:
+      direction: long
+      interval_candles: 6  # one scheduled buy per day on H4
+      take_profit_pct: 2.0
+      stop_loss_pct: 5.0   # close the whole cycle 5% below its average entry (0 = off)
+      safety_orders: 2
+      safety_step_pct: 2.0
+      safety_scale: 1.0    # each safety order the same size as the base order
+      max_buys: 3          # at most 3 ounces open at once

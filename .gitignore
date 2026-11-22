@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and personal settings (create them with: forex-bot init)
+.env
+config.yaml
+
+# Runtime output
+state/
+logs/
+reports/
+data/

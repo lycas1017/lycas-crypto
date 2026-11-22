@@ -1,0 +1,12 @@
+# Runs the bot 24/7 and restarts it after crashes or reboots.
+#   docker compose up -d --build      start (paper trading by default)
+#   docker compose logs -f            watch
+#   docker compose down               stop
+# For live trading change the command to ["live", "--yes"] and set LIVE_TRADING=true in .env.
+services:
+  forex-bot:
+    build: .
+    command: ["paper"]
+    volumes:
+      - ./:/bot
+    restart: unless-stopped
